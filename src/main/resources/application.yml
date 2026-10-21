@@ -1,0 +1,83 @@
+spring:
+  application:
+    name: clearbook
+
+  datasource:
+    url: ${CLEARBOOK_DB_URL:jdbc:postgresql://localhost:5432/clearbook}
+    username: ${CLEARBOOK_DB_USER:postgres}
+    password: ${CLEARBOOK_DB_PASSWORD:postgres}
+    hikari:
+      # Postings are short transactions that take a row lock. A pool much
+      # larger than the database can usefully run in parallel converts
+      # throughput into lock contention and optimistic-lock retries.
+      maximum-pool-size: 16
+      pool-name: clearbook-pool
+
+  jpa:
+    # Flyway owns the schema. `validate` makes a mismatch between the entities
+    # and the migrations fail at startup, which is the moment you want to find
+    # out — not when a column turns out to be missing mid-posting.
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          # Journal lines are inserted a handful at a time per entry; batching
+          # them is the difference between one round trip and seven.
+          batch_size: 32
+        order_inserts: true
+        order_updates: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  kafka:
+    bootstrap-servers: ${CLEARBOOK_KAFKA:localhost:9092}
+    consumer:
+      group-id: clearbook-settlement
+      auto-offset-reset: earliest
+      # The container commits offsets after the listener returns, so a crash
+      # mid-processing replays the record rather than losing it. Redelivery is
+      # safe here because posting is idempotent on the trade id.
+      enable-auto-commit: false
+      properties:
+        spring.json.trusted.packages: com.aryanbhujbal.clearbook.kafka
+    listener:
+      ack-mode: record
+    producer:
+      # The dead-letter producer must not lose records either.
+      acks: all
+
+clearbook:
+  kafka:
+    trades-topic: fills.inbound
+    group-id: clearbook-settlement
+
+  # Illustrative rates, in the shape of Indian equity delivery charges.
+  # NOT a statement of current statutory rates — check the circulars.
+  fees:
+    brokerage-rate: "0.0003"
+    brokerage-cap-paise: 2000
+    securities-transaction-tax-rate: "0.001"
+    exchange-transaction-rate: "0.0000297"
+    regulator-turnover-rate: "0.000001"
+    stamp-duty-rate: "0.00015"
+    goods-and-services-tax-rate: "0.18"
+
+  margin:
+    maintenance-rate: "0.20"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    com.aryanbhujbal.clearbook: INFO
